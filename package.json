@@ -5,12 +5,31 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "qdrant:up": "docker compose up -d qdrant",
+    "qdrant:down": "docker compose down",
+    "qdrant:logs": "docker compose logs -f qdrant",
+    "ingest": "tsx scripts/ingest.ts",
+    "search": "tsx scripts/search.ts",
+    "triage": "tsx scripts/triage.ts",
+    "jira:poll": "tsx scripts/jira-poll.ts",
+    "load:tickets": "tsx scripts/load-tickets.ts",
+    "eval": "tsx scripts/eval.ts",
+    "sweep": "tsx scripts/sweep.ts",
+    "seed:jira": "tsx scripts/seed-jira.ts",
+    "jira:create-project": "tsx scripts/create-jira-project.ts",
+    "jira:delete": "tsx scripts/delete-jira-tickets.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.79",
+    "@ai-sdk/openai": "^3.0.65",
+    "@qdrant/js-client-rest": "^1.18.0",
+    "ai": "^6.0.191",
+    "dotenv": "^17.4.2",
     "next": "16.2.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -18,6 +37,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
+    "tsx": "^4.22.3",
     "typescript": "^5"
   }
 }
