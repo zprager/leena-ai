@@ -335,6 +335,12 @@
           or a structured <strong>DEFER</strong> tagged with one of twelve standardized
           reason codes.
         </p>
+        <a
+          href="architecture.html"
+          style="display:inline-flex;align-items:center;gap:6px;margin-top:16px;padding:8px 14px;background:var(--surface);border:1px solid var(--line);border-radius:6px;font-size:13px;color:var(--ink-2);text-decoration:none;"
+        >
+          For the system-level view (ingestion · JIRA · persistence), see Architecture →
+        </a>
       </header>
 
       <section>
@@ -486,6 +492,11 @@ flowchart TD
           <article class="phase optional">
             <span class="num">2b</span>
             <h3>Cohere rerank (opt-in)</h3>
+            <p style="font-style: italic; color: var(--ink); border-left: 3px solid var(--accent-optional); padding-left: 12px; margin-bottom: 12px;">
+              The vector database is good at finding <em>possible</em> matches.
+              Rerank is better at deciding which of those matches actually
+              answer the question.
+            </p>
             <p>
               When <code>RAG_RERANK_ENABLED=true</code>, retrieval pulls
               <code>RERANK_CANDIDATE_K</code> (default 20) cosine hits from
@@ -528,7 +539,40 @@ flowchart TD
               model was shown. Catches hallucinated citations and citations
               from outside the retrieved set.
             </p>
-            <div class="files"><code>src/lib/rag/format.ts</code> · <code>isCitationGrounded()</code></div>
+            <p style="margin-top: 12px;"><strong>How it's checked, in two steps:</strong></p>
+            <ol style="margin: 0 0 12px; padding-left: 18px; color: var(--ink-2); font-size: 14px;">
+              <li>
+                <strong>Parse the citation string</strong> with a regex into
+                <code>{ policyId, sectionId }</code> — e.g.
+                <code>"POL-02 §2.3"</code> →
+                <code>{ policyId: "POL-02", sectionId: "2.3" }</code>.
+                Tolerates the variants the LLM tends to emit
+                (<code>"POL-02 sec 2.3"</code>, <code>"POL-02 section 2.3"</code>).
+                If the string doesn't match the expected shape, the guard
+                fails immediately.
+              </li>
+              <li>
+                <strong>Exact ID match against the retrieved hits</strong>:
+                <code>hits.some(h =&gt; h.policyId === parsed.policyId &amp;&amp; h.sectionId === parsed.sectionId)</code>.
+                Both fields must match. The
+                <code>hits</code> array carries the same
+                <code>policyId</code> + <code>sectionId</code> metadata Qdrant
+                returned during retrieval, sourced from the policy data at
+                ingest time — so the comparison is between two strings that
+                came from the same canonical source. There's no fuzzy match,
+                no vector similarity, no normalization beyond uppercasing the
+                policy id.
+              </li>
+            </ol>
+            <p style="margin-top: 0; font-size: 13px; color: var(--ink-3);">
+              Why ID match, not similarity: citations are structured
+              identifiers, not free text. <code>POL-02 §2.3</code> either
+              points at a section we showed the model or it doesn't —
+              there's no "almost POL-02 §2.3" that's still grounded.
+            </p>
+            <div class="files">
+              <code>src/lib/rag/format.ts</code> · <code>parseCitation()</code> + <code>isCitationGrounded()</code>
+            </div>
           </article>
 
           <article class="phase guard">
@@ -684,7 +728,8 @@ Decide RESOLVE or DEFER per the rules. If RESOLVE, your citation MUST exactly ma
           <code>src/lib/rag/retrieve.ts</code>
         </div>
         <div>
-          See also: <a href="../README.md">README</a> ·
+          Companion: <a href="architecture.html">Architecture</a> ·
+          <a href="../README.md">README</a> ·
           <a href="../fixtures/eval-50.json">eval set</a>
         </div>
       </footer>

@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>System architecture — Helix Helpdesk Agent</title>
+    <meta
+      name="description"
+      content="Top-down map of the Helix helpdesk agent: knowledge ingestion, JIRA integration, eval + calibration, persistence layers, and the deployment shape."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <style>
+      :root {
+        --bg: #fafafa;
+        --surface: #ffffff;
+        --ink: #0f172a;
+        --ink-2: #334155;
+        --ink-3: #64748b;
+        --line: #e2e8f0;
+        --line-2: #cbd5e1;
+
+        --accent-data: #059669;
+        --accent-app: #4f46e5;
+        --accent-ext: #ea580c;
+        --accent-cli: #475569;
+        --accent-optional: #7c3aed;
+
+        --bg-data: #d1fae5;
+        --bg-app: #eef2ff;
+        --bg-ext: #fff7ed;
+        --bg-cli: #f1f5f9;
+        --bg-optional: #f5f3ff;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0b1220;
+          --surface: #111827;
+          --ink: #f1f5f9;
+          --ink-2: #cbd5e1;
+          --ink-3: #94a3b8;
+          --line: #1f2937;
+          --line-2: #334155;
+
+          --bg-data: #022c22;
+          --bg-app: #1e1b4b;
+          --bg-ext: #431407;
+          --bg-cli: #1e293b;
+          --bg-optional: #2e1065;
+        }
+      }
+
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        line-height: 1.6;
+      }
+      code, .mono {
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.86em;
+      }
+      a { color: var(--accent-app); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      .page {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 64px 24px 96px;
+      }
+
+      header.hero { margin-bottom: 48px; }
+      .kicker {
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent-app);
+        margin-bottom: 8px;
+      }
+      h1 {
+        font-size: clamp(2rem, 4vw, 3rem);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 12px;
+        line-height: 1.15;
+      }
+      .lede {
+        font-size: 18px;
+        color: var(--ink-2);
+        max-width: 68ch;
+        margin: 0;
+      }
+
+      .crosslink {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 16px;
+        padding: 8px 14px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        font-size: 13px;
+        color: var(--ink-2);
+      }
+      .crosslink:hover {
+        text-decoration: none;
+        border-color: var(--accent-app);
+        color: var(--ink);
+      }
+      .crosslink::after {
+        content: "→";
+        color: var(--accent-app);
+        font-weight: 600;
+      }
+
+      h2 {
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        color: var(--ink);
+        margin: 0 0 16px;
+      }
+      h3 { font-size: 15px; font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+      p { margin: 0 0 12px; color: var(--ink-2); }
+      ul { margin: 0; padding-left: 18px; color: var(--ink-2); }
+      ul li + li { margin-top: 2px; }
+      section + section { margin-top: 48px; }
+
+      /* Legend */
+      .legend {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+      .legend-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 14px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .swatch {
+        flex: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        margin-top: 3px;
+        border: 1px solid rgba(0, 0, 0, 0.05);
+      }
+      .legend-item .label { font-size: 13px; font-weight: 600; color: var(--ink); }
+      .legend-item .desc { font-size: 12px; color: var(--ink-3); line-height: 1.4; }
+      .swatch.cli { background: var(--bg-cli); border-color: var(--accent-cli); }
+      .swatch.app { background: var(--bg-app); border-color: var(--accent-app); }
+      .swatch.data { background: var(--bg-data); border-color: var(--accent-data); }
+      .swatch.ext { background: var(--bg-ext); border-color: var(--accent-ext); }
+      .swatch.optional {
+        background: var(--bg-optional);
+        border-color: var(--accent-optional);
+        border-style: dashed;
+      }
+
+      /* Diagram card */
+      .diagram-card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 32px 16px;
+        overflow-x: auto;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 0 0 1px rgba(15, 23, 42, 0.02);
+      }
+      .diagram-card.small { padding: 20px 12px; }
+      .mermaid { display: flex; justify-content: center; }
+      .mermaid svg { max-width: 100%; height: auto; }
+
+      /* Two-column subsystem layout */
+      .subsystem {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      @media (min-width: 760px) {
+        .subsystem.split {
+          grid-template-columns: 1.2fr 1fr;
+        }
+      }
+
+      /* Info cards */
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 18px 20px;
+      }
+      .card.app { border-top: 3px solid var(--accent-app); }
+      .card.data { border-top: 3px solid var(--accent-data); }
+      .card.ext { border-top: 3px solid var(--accent-ext); }
+      .card.cli { border-top: 3px solid var(--accent-cli); }
+      .card h3 + p { font-size: 14px; }
+      .files {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--line);
+        font-size: 12px;
+        color: var(--ink-3);
+      }
+      .files code { color: var(--ink-2); }
+
+      /* Tables */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        font-size: 13.5px;
+      }
+      th, td {
+        text-align: left;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      tr:last-child th, tr:last-child td { border-bottom: none; }
+      th {
+        background: var(--bg-cli);
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--ink-3);
+      }
+      td code { color: var(--ink); }
+
+      /* Pillquote */
+      blockquote {
+        margin: 0 0 16px;
+        padding: 12px 16px;
+        background: var(--bg-app);
+        border-left: 3px solid var(--accent-app);
+        border-radius: 4px;
+        font-style: italic;
+        color: var(--ink);
+      }
+
+      /* Footer */
+      footer {
+        margin-top: 64px;
+        padding-top: 24px;
+        border-top: 1px solid var(--line);
+        font-size: 13px;
+        color: var(--ink-3);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px 24px;
+        justify-content: space-between;
+      }
+      footer code { color: var(--ink-2); }
+
+      @media print {
+        body { background: white; }
+        .page { padding: 24px; max-width: none; }
+        .diagram-card { box-shadow: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <span class="kicker">Architecture · Helix Helpdesk Agent</span>
+        <h1>System architecture</h1>
+        <p class="lede">
+          The high-level map: how the 10 IT policies become a vector store, how
+          JIRA tickets get pulled in and decisions get written back, how the
+          eval harness closes the loop on calibration, and where each layer's
+          data actually lives.
+        </p>
+        <a class="crosslink" href="triage-pipeline.html">
+          For the per-ticket decision flow, see Triage pipeline
+        </a>
+      </header>
+
+      <section>
+        <h2>Color legend</h2>
+        <div class="legend">
+          <div class="legend-item">
+            <span class="swatch cli"></span>
+            <div>
+              <div class="label">CLI / operator</div>
+              <div class="desc">npm scripts the engineer runs by hand. One-shot, side-effectful.</div>
+            </div>
+          </div>
+          <div class="legend-item">
+            <span class="swatch app"></span>
+            <div>
+              <div class="label">App (Next.js)</div>
+              <div class="desc">Pages, API routes, agent core. Long-running process.</div>
+            </div>
+          </div>
+          <div class="legend-item">
+            <span class="swatch data"></span>
+            <div>
+              <div class="label">Data store</div>
+              <div class="desc">Persistent state — Qdrant volume, filesystem, JIRA itself.</div>
+            </div>
+          </div>
+          <div class="legend-item">
+            <span class="swatch ext"></span>
+            <div>
+              <div class="label">External service</div>
+              <div class="desc">Out-of-process APIs: JIRA Cloud, LLM providers, reranker.</div>
+            </div>
+          </div>
+          <div class="legend-item">
+            <span class="swatch optional"></span>
+            <div>
+              <div class="label">Optional / opt-in</div>
+              <div class="desc">Dashed border. Off by default; flipped on via env.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>System at a glance</h2>
+        <div class="diagram-card">
+          <pre class="mermaid">
+flowchart LR
+    subgraph EXT[External services]
+        direction TB
+        JIRA[JIRA Cloud<br/>REST v3]
+        ANT[Anthropic API]
+        OAI[OpenAI API]
+        COH[Cohere API<br/>rerank · OPT-IN]
+    end
+
+    subgraph CLI_[CLI / operator]
+        direction TB
+        CLI1[ingest]
+        CLI2[seed:jira · jira:create-project · jira:delete]
+        CLI3[triage · search · load:tickets]
+        CLI4[eval · sweep]
+    end
+
+    subgraph APP[Next.js app · long-running]
+        direction TB
+        UI[Pages<br/>/ /tickets /triage /eval /sweep]
+        API[API routes<br/>/api/triage /api/eval /api/sweep<br/>/api/tickets /api/prompt /api/stats]
+        CORE[Agent core<br/>retrieve + triage]
+    end
+
+    subgraph DATA[Persistent state]
+        direction TB
+        QDR[(Qdrant volume<br/>60 vectors + payload)]
+        FS[(reports/sweeps/<br/>JSON per sweep)]
+        MEM[(globalThis caches<br/>triage-store · eval-store)]
+    end
+
+    UI --> API
+    API --> CORE
+    CLI3 --> CORE
+    CLI4 --> CORE
+
+    CORE -->|embed| OAI
+    CORE -->|chat| ANT
+    CORE -->|chat| OAI
+    CORE -.->|opt-in rerank| COH
+    CORE -->|vector search| QDR
+    CLI1 -->|embed + upsert| QDR
+
+    CLI2 -->|create + delete| JIRA
+    CLI3 -->|read + write-back| JIRA
+    API -->|read| JIRA
+
+    API -->|write| FS
+    CLI4 -->|write| FS
+    API -->|R/W| MEM
+    CORE -->|R/W via store| MEM
+
+    classDef ext fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px
+    classDef cli fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:1.5px
+    classDef app fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b,stroke-width:1.5px
+    classDef data fill:#d1fae5,stroke:#059669,color:#064e3b,stroke-width:1.5px
+    classDef optional fill:#f5f3ff,stroke:#7c3aed,color:#4c1d95,stroke-width:1.5px,stroke-dasharray:6 4
+
+    class JIRA,ANT,OAI ext
+    class COH optional
+    class CLI1,CLI2,CLI3,CLI4 cli
+    class UI,API,CORE app
+    class QDR,FS,MEM data
+          </pre>
+        </div>
+      </section>
+
+      <section>
+        <h2>1. Knowledge ingestion</h2>
+        <blockquote>
+          One source of truth for the policies (TypeScript), one batch script
+          to publish them into the vector store, and a stable point-id scheme
+          so re-ingest is idempotent.
+        </blockquote>
+
+        <div class="diagram-card small">
+          <pre class="mermaid">
+flowchart LR
+    A[src/lib/knowledge/policies.ts<br/>POL-01..POL-10<br/>60 sections] --> B[allChunks<br/>flatten · stable point id]
+    B --> C[embedTexts<br/>text-embedding-3-small<br/>1536 dims]
+    C --> D[ensureCollection<br/>Cosine distance<br/>payload indexes]
+    D --> E[upsertChunks<br/>id · vector · payload]
+    E --> F[(Qdrant volume)]
+
+    classDef cli fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:1.5px
+    classDef ext fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px
+    classDef data fill:#d1fae5,stroke:#059669,color:#064e3b,stroke-width:1.5px
+    class A,B,D,E cli
+    class C ext
+    class F data
+          </pre>
+        </div>
+
+        <div class="subsystem split">
+          <div class="card cli">
+            <h3>Why TypeScript, not JSON or markdown</h3>
+            <p>
+              Policies are domain data, not loose documents — they have a fixed
+              shape (id, title, effective, owner, sections) we want type-checked.
+              TS means IDE jump-to-definition, no schema drift, single
+              source of truth that compiles or doesn't. JSON would lose the
+              types; markdown would require a parser and a section-id scheme
+              that lives outside the data.
+            </p>
+            <div class="files"><code>src/lib/knowledge/policies.ts</code></div>
+          </div>
+          <div class="card cli">
+            <h3>Why one chunk per section</h3>
+            <p>
+              Each policy section already is the natural atomic unit
+              (POL-01 §1.4 = "Accounts are locked after 5 attempts..."). Sub-
+              chunking would dilute citations — the agent needs to point at a
+              section, not a sentence. 60 sections × 1536 dims sits trivially
+              in memory; Qdrant's HNSW doesn't even build an index at this size.
+            </p>
+            <div class="files"><code>allChunks()</code> in policies.ts</div>
+          </div>
+          <div class="card cli">
+            <h3>Stable point IDs</h3>
+            <p>
+              <code>pointId = policyNum * 10000 + major * 100 + minor</code>.
+              POL-01 §1.4 → 10104. Deterministic and collision-free for our
+              numbering scheme. Re-running <code>npm run ingest</code> upserts
+              over the same ids — no duplicates, no drift, no migration script.
+            </p>
+          </div>
+          <div class="card cli">
+            <h3>Embedding input</h3>
+            <p>
+              We embed <code>${'${policyId} ${title} §${sectionId}\\n${text}'}</code>
+              — not just the section body. The title in the embedding string
+              boosts retrieval for terse queries ("VPN policy?") that don't
+              quote the section text verbatim. Empirically improves recall on
+              the short-question end of the eval set.
+            </p>
+          </div>
+        </div>
+
+        <p>Run via:</p>
+        <div class="diagram-card small">
+          <pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--ink-2);">npm run ingest             # incremental upsert
+npm run ingest -- --reset  # drop & recreate the collection</pre>
+        </div>
+      </section>
+
+      <section>
+        <h2>2. JIRA integration</h2>
+        <blockquote>
+          Three operation groups (read, write, meta) over Cloud REST v3, with
+          a thin custom client. ADF in both directions for v3 compatibility.
+          Operator scripts wrap the noisy bits.
+        </blockquote>
+
+        <div class="diagram-card small">
+          <pre class="mermaid">
+flowchart LR
+    subgraph READ[Read]
+        R1[listTickets · JQL]
+        R2[getTicket · key]
+        R3[iterTickets · paged]
+    end
+    subgraph WRITE[Write]
+        W1[createTicket]
+        W2[postComment · MD→ADF]
+        W3[addLabels]
+        W4[transitionTicket]
+        W5[assignTicket]
+        W6[deleteTicket]
+    end
+    subgraph META[Meta · setup]
+        M1[listTransitions]
+        M2[findUserByEmail]
+        M3[createProject]
+    end
+
+    SCRIPTS[CLI scripts<br/>+ API routes] --> READ
+    SCRIPTS --> WRITE
+    SCRIPTS --> META
+    READ --> JIRA[(JIRA Cloud)]
+    WRITE --> JIRA
+    META --> JIRA
+
+    classDef cli fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:1.5px
+    classDef ext fill:#fff7ed,stroke:#ea580c,color:#7c2d12,stroke-width:1.5px
+    class SCRIPTS,R1,R2,R3,W1,W2,W3,W4,W5,W6,M1,M2,M3 cli
+    class JIRA ext
+          </pre>
+        </div>
+
+        <h3 style="margin-top: 24px;">Operations map — what calls what</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Concern</th>
+              <th>JIRA op</th>
+              <th>Called from</th>
+              <th>Trigger</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Show the queue</td>
+              <td><code>listTickets(JQL)</code></td>
+              <td><code>/tickets</code> page · <code>/api/tickets</code></td>
+              <td>User opens the page</td>
+            </tr>
+            <tr>
+              <td>Triage one ticket</td>
+              <td><code>getTicket(key)</code></td>
+              <td><code>/api/triage</code></td>
+              <td>UI Run-triage button</td>
+            </tr>
+            <tr>
+              <td>Post agent's decision</td>
+              <td><code>postComment</code> + <code>addLabels</code> + <code>transitionTicket</code> + <code>assignTicket</code></td>
+              <td><code>scripts/load-tickets.ts --write-back</code></td>
+              <td>Operator runs the batch</td>
+            </tr>
+            <tr>
+              <td>Bootstrap a project</td>
+              <td><code>createProject</code></td>
+              <td><code>scripts/create-jira-project.ts</code></td>
+              <td><code>npm run jira:create-project</code></td>
+            </tr>
+            <tr>
+              <td>Seed sample tickets</td>
+              <td><code>createTicket</code> ×N</td>
+              <td><code>scripts/seed-jira.ts</code></td>
+              <td><code>npm run seed:jira</code></td>
+            </tr>
+            <tr>
+              <td>Bulk cleanup</td>
+              <td><code>deleteTicket</code> ×N</td>
+              <td><code>scripts/delete-jira-tickets.ts</code></td>
+              <td><code>npm run jira:delete -- --confirm</code></td>
+            </tr>
+            <tr>
+              <td>Discover transition IDs</td>
+              <td><code>listTransitions(key)</code></td>
+              <td>One-off CLI</td>
+              <td>Setup time</td>
+            </tr>
+            <tr>
+              <td>Resolve assignee email → accountId</td>
+              <td><code>findUserByEmail</code></td>
+              <td><code>scripts/load-tickets.ts</code></td>
+              <td>Once per batch run</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="subsystem split" style="margin-top: 20px;">
+          <div class="card cli">
+            <h3>Why a custom client (not @atlaskit/jira-client or similar)</h3>
+            <p>
+              The official Node clients are heavy, opinionated, and drag in
+              types for every JIRA feature we don't use. We need ~10 endpoints.
+              A thin <code>JiraClient</code> wrapping <code>fetch</code> with
+              auth + JSON serialization is ~80 lines, fully typed against only
+              the fields we read, and lets us own the error surface
+              (<code>JiraApiError</code> with the actual response body).
+            </p>
+            <div class="files"><code>src/lib/jira/client.ts</code> · <code>src/lib/jira/tickets.ts</code></div>
+          </div>
+          <div class="card cli">
+            <h3>ADF (Atlassian Document Format) — both directions</h3>
+            <p>
+              JIRA Cloud v3 returns descriptions as ADF (nested JSON, not plain
+              text) and accepts comments as ADF. We have
+              <code>adfToPlainText()</code> for inbound (so the agent sees a
+              flat string) and <code>markdownToAdf()</code> for outbound (so
+              the agent's <code>formatComment()</code> markdown renders with
+              the right styling in JIRA).
+            </p>
+            <div class="files"><code>src/lib/jira/tickets.ts</code> · <code>src/lib/jira/comments.ts</code></div>
+          </div>
+          <div class="card cli">
+            <h3>Auth</h3>
+            <p>
+              Basic auth: Atlassian account email + API token (created at
+              <code>id.atlassian.com</code>). Stored in env vars only, never
+              committed. The client accepts OAuth bearer too if you want to
+              swap later — both are typed in <code>JiraAuth</code>.
+            </p>
+          </div>
+          <div class="card cli">
+            <h3>Queue semantics</h3>
+            <p>
+              The "queue" is whatever JQL you set in
+              <code>JIRA_QUEUE_JQL</code> — typically
+              <code>status = Backlog AND labels = "seeded"</code>. The
+              <code>/tickets</code> page and the
+              <code>load-tickets</code> batch both read from it. Triage moves
+              tickets out of the queue via the transition IDs, so the queue
+              naturally drains as the agent works.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>3. Eval &amp; calibration</h2>
+        <blockquote>
+          The 50-ticket benchmark plus the sweep harness is what turns
+          "the agent feels good" into "the agent scores 50/50 with
+          <code>RETRIEVAL_SCORE_THRESHOLD=0.30</code>, documented."
+        </blockquote>
+
+        <div class="diagram-card small">
+          <pre class="mermaid">
+flowchart LR
+    DATA[fixtures/eval-50.json<br/>50 tickets · ground truth]
+    RUN[runEval<br/>concurrent triage · score]
+    SWEEP[runSweep<br/>vary threshold · pick winner]
+    CSV[reports/eval.csv · MD]
+    SJSON[(reports/sweeps/&lt;id&gt;.json)]
+    UI[UI<br/>/eval · /sweep]
+
+    DATA --> RUN
+    RUN --> CSV
+    RUN --> UI
+    SWEEP --> RUN
+    SWEEP --> SJSON
+    SWEEP --> UI
+
+    classDef cli fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:1.5px
+    classDef data fill:#d1fae5,stroke:#059669,color:#064e3b,stroke-width:1.5px
+    classDef app fill:#eef2ff,stroke:#4f46e5,color:#1e1b4b,stroke-width:1.5px
+
+    class DATA,SJSON,CSV data
+    class RUN,SWEEP cli
+    class UI app
+          </pre>
+        </div>
+
+        <p>
+          The eval harness scores every ticket into one of six buckets — see
+          the <a href="triage-pipeline.html">triage pipeline doc</a> for the
+          bucket weights and the post-validation guards that produce them.
+          The sweep wraps it: runs the eval N times across a threshold range,
+          picks the value with the lowest weighted error, writes the full
+          per-ticket data to <code>reports/sweeps/&lt;id&gt;.json</code> so a
+          future operator can answer "at threshold=0.45, which specific
+          tickets newly failed compared to 0.40?" without re-running.
+        </p>
+
+        <div class="card cli" style="margin-top: 16px;">
+          <h3>What the sweep is actually varying</h3>
+          <p>
+            The "threshold" the sweep tunes is
+            <code>RETRIEVAL_SCORE_THRESHOLD</code> — but it's
+            <strong>not</strong> a retrieval filter. Every cosine top-K hit
+            goes into the LLM context regardless of score. The threshold is
+            the floor used by <strong>Guard 2</strong> in the triage pipeline:
+            after the LLM proposes a RESOLVE, the post-validation step
+            compares the top retrieval hit's cosine similarity (ticket
+            embedding vs the top-matching policy section's embedding) to the
+            threshold. If it's below, the RESOLVE is downgraded to
+            <code>DEFER · LOW_CONFIDENCE</code>.
+          </p>
+          <p style="margin-bottom: 0;">
+            So the sweep is searching for the precision/recall trade-off on a
+            single deterministic guard, not on retrieval itself:
+          </p>
+          <ul style="font-size: 14px; margin-top: 6px;">
+            <li><strong>Too low</strong> → confident-but-wrong RESOLVEs slip through (<code>false_resolve</code>, weighted 3×).</li>
+            <li><strong>Too high</strong> → correct RESOLVEs get over-deferred (<code>missed_resolve</code>, weighted 1×).</li>
+            <li>The 3× asymmetry tells the optimizer which way to err. At our corpus, the sweet spot landed at <code>0.30</code>.</li>
+          </ul>
+          <div class="files">
+            See <a href="triage-pipeline.html">triage pipeline → Guard 2</a>
+            for the exact line where the comparison happens.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>4. Persistence layers</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>What's in it</th>
+              <th>Survives Next dev restart?</th>
+              <th>Survives Docker restart?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Qdrant volume</strong></td>
+              <td>60 policy-section embeddings + payload</td>
+              <td>✓</td>
+              <td>✓ (Docker volume)</td>
+            </tr>
+            <tr>
+              <td><strong>JIRA Cloud</strong></td>
+              <td>Authoritative tickets, comments, labels, assignees</td>
+              <td>✓</td>
+              <td>✓ (external)</td>
+            </tr>
+            <tr>
+              <td><strong><code>reports/sweeps/</code></strong></td>
+              <td>Full per-ticket eval data per sweep run</td>
+              <td>✓</td>
+              <td>✓ (filesystem)</td>
+            </tr>
+            <tr>
+              <td><strong><code>reports/eval.csv</code></strong></td>
+              <td>Rubric-required deliverable when CLI passes <code>--out</code></td>
+              <td>✓</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td><strong><code>triage-store</code></strong> (globalThis Map)</td>
+              <td>Recent triage decisions for the dashboard list</td>
+              <td>✗ (in-memory)</td>
+              <td>n/a</td>
+            </tr>
+            <tr>
+              <td><strong><code>eval-store</code></strong> (globalThis cache)</td>
+              <td>Last completed eval run, for <code>/eval</code> hydration</td>
+              <td>✗ (in-memory)</td>
+              <td>n/a</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top: 14px;">
+          The in-memory stores are bound to <code>globalThis</code> so they
+          survive Next's bundler creating multiple module instances within a
+          single process. They're intentionally ephemeral: JIRA is the
+          authoritative record for triage decisions (via the comment we
+          posted); the in-memory store is a dashboard convenience.
+        </p>
+      </section>
+
+      <section>
+        <h2>5. Deployment shape</h2>
+        <div class="subsystem split">
+          <div class="card cli">
+            <h3>Local dev (what's running right now)</h3>
+            <ul>
+              <li><code>docker compose up qdrant</code> — vector store, one container</li>
+              <li><code>npm run dev</code> — Next.js on the host, port 3001</li>
+              <li>All external APIs (Anthropic / OpenAI / Cohere / JIRA) hit over the network</li>
+              <li>State: Qdrant volume on disk + <code>reports/</code> in repo + in-memory caches</li>
+            </ul>
+          </div>
+          <div class="card cli">
+            <h3>Production shape (what would change)</h3>
+            <ul>
+              <li>Containerize Next.js (Vercel or a managed Node host)</li>
+              <li>Qdrant on managed cloud OR same Docker volume on a persistent disk</li>
+              <li>Move in-memory stores to Redis or a real DB (Postgres) so they survive restarts and scale horizontally</li>
+              <li>JIRA webhook → <code>/api/jira/webhook</code> instead of polling — already wired</li>
+              <li>Structured logging with request IDs; alerts on <code>trace.downgraded</code> rate</li>
+              <li>LLM provider failover (Anthropic primary → OpenAI fallback)</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <div>
+          Companion doc: <a href="triage-pipeline.html">Triage pipeline</a> — per-ticket decision flow
+        </div>
+        <div>
+          See also: <a href="../README.md">README</a> ·
+          <a href="../fixtures/eval-50.json">eval set</a>
+        </div>
+      </footer>
+    </div>
+
+    <script>
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "base",
+        themeVariables: {
+          fontFamily: '"Inter", -apple-system, sans-serif',
+          fontSize: "14px",
+          lineColor: prefersDark ? "#475569" : "#64748b",
+          mainBkg: prefersDark ? "#111827" : "#ffffff",
+          background: "transparent",
+        },
+        flowchart: {
+          curve: "basis",
+          padding: 16,
+          nodeSpacing: 40,
+          rankSpacing: 50,
+          htmlLabels: true,
+        },
+        securityLevel: "strict",
+      });
+    </script>
+  </body>
+</html>
